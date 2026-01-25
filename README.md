@@ -1,0 +1,2 @@
+# IWannaCryOS-9328
+An Arduino UNO Project involving the TFT driver ILI9328 and multiplexed inputs from two PISO shift registers 74HC165 and one SIPO shift register 74HC595. This project aims to run an AST-based Calculator, A Grapher, A Paint program and a Notepad program on the Arduino UNO Microcontroller board.
