@@ -19,8 +19,8 @@ enum TOKTYPE {
 };
 
 enum NodeType : uint8_t {
-  // Literals
   NODE_NUM,  // numbers
+  NODE_UNA,
 
   // Binary operators
   NODE_ADD,  // +
@@ -28,9 +28,6 @@ enum NodeType : uint8_t {
   NODE_MUL,  // *
   NODE_DIV,  // /
   NODE_EXP,  // ^
-
-  // Parentheses aren’t nodes themselves—they just affect parsing
-  // NODE_LPAREN, NODE_RPAREN  <-- unnecessary in AST
 
   // Functions
   NODE_SIN,
@@ -41,8 +38,11 @@ enum NodeType : uint8_t {
   NODE_CEI
 };
 
-char input[256] = "32767.36+25-25*25/25^(25)*sin()";  // input
+char input[256] = "398.23^(3*2)";  // input
 char output[64];
+
+  uint8_t TokIndex = 0;
+  uint8_t NodIndex;
 
 #define FACTOR 256
 
@@ -53,15 +53,14 @@ typedef struct {
 
 Token tokens[64];
 
-typedef struct{
+typedef struct {
     NodeType typ;
     int32_t val;
-    uint8_t lnodeindex;
-    uint8_t rnodeindex;
+    int8_t lnode;  // Index of the left node in the array (-1 if none)
+    int8_t rnode;  // Index of the right node in the array (-1 if none)
 } Node;
 
-Node nodes[32];
-
+Node nodes[32]; // Your "Pool" of 32 nodes
 uint32_t parseNumber(char** p) {
   uint32_t val = 0;
 
@@ -91,7 +90,7 @@ uint32_t parseNumber(char** p) {
 }
 
 void Tokenizer(char* exp) {
-  uint8_t TokIndex = 0;
+  TokIndex = 0;
   char* p = exp;
 
   while (*p && TokIndex < 63) {  // leave space for sentinel
@@ -164,6 +163,8 @@ void Tokenizer(char* exp) {
     }
 
     else {
+      tokens[TokIndex].typ = TOK_NULL;
+      tokens[TokIndex].val = 0;
       p++;
     }
   }
@@ -171,80 +172,217 @@ void Tokenizer(char* exp) {
   // Add sentinel token
   tokens[TokIndex].typ = TOK_NULL;
   tokens[TokIndex].val = 0;
+  TokIndex=0;
 }
+
+int a;
 
 void Parser() {
-    uint8_t TokIndex = 0;
-    uint8_t NodIndex;
-    parseTerm(TokIndex, NodIndex);
+
+    a = parseExpression();
 }
 
 
-void parseTerm(uint8_t TokIndex, uint8_t NodIndex) {
-
+int parseExpression() {
+  uint32_t l = parseFactor();
+  while (tokens[TokIndex].typ == OP_ADD || tokens[TokIndex].typ == OP_SUB) {
+    NodeType a = (tokens[TokIndex].typ == OP_ADD) ? NODE_ADD : NODE_SUB;
+    TokIndex++;
+    uint8_t opIdidx = NodIndex++;
+    nodes[opIdidx].lnode = l;
+    nodes[opIdidx].rnode = parseFactor();
+    nodes[opIdidx].typ = a;
+    l = opIdidx;
+  }
+  return l;
+  
 }
 
-void parseFactor(uint8_t TokIndex, uint8_t NodIndex) {
-
+int parseFactor() {
+  uint32_t l = parseUnary();
+  while (tokens[TokIndex].typ == OP_MUL || tokens[TokIndex].typ == OP_DIV) {
+    NodeType a = (tokens[TokIndex].typ == OP_MUL) ? NODE_MUL : NODE_DIV;
+    TokIndex++;
+    uint8_t opIdidx = NodIndex++;
+    nodes[opIdidx].lnode = l;
+    nodes[opIdidx].rnode = parseUnary();
+    nodes[opIdidx].typ = a;
+    l = opIdidx;
+  }
+  return l;
 }
 
-void parseExp(uint8_t TokIndex, uint8_t NodIndex) {
-
+int parsePower() {
+  uint32_t l = parsePrimary();
+  if (tokens[TokIndex].typ == OP_EXP) {
+    TokIndex++;
+    uint8_t opIdidx = NodIndex++;
+    nodes[opIdidx].typ = NODE_EXP;
+    nodes[opIdidx].lnode = l;
+    nodes[opIdidx].rnode = parsePower();
+    return opIdidx;
+  }
+  return l;
 }
 
-void parseExpression(uint8_t TokIndex, uint8_t NodIndex) {
-
+int parseUnary() {
+  
+  if (tokens[TokIndex].typ == OP_SUB) {
+    int8_t opIdx = NodIndex++;
+    TokIndex++; 
+    
+    nodes[opIdx].typ = NODE_UNA;
+    nodes[opIdx].lnode = -1; 
+    nodes[opIdx].rnode = parseUnary(); 
+    return opIdx;
+  }
+  
+  return parsePower(); 
 }
 
+
+int parsePrimary() {
+  if (tokens[TokIndex].typ == L_PAREN) {
+    TokIndex++;
+    int val = parseExpression();
+    TokIndex++;
+    return val;
+  }
+  if (tokens[TokIndex].typ == NUM) {
+    nodes[NodIndex].typ = NODE_NUM;
+    nodes[NodIndex].val = tokens[TokIndex++].val ;
+    nodes[NodIndex].lnode = -1;
+    nodes[NodIndex].rnode = -1;
+    return NodIndex++;
+  }
+  return -1;
+}
+
+// Helper to get node type name
+const char* getNodeTypeName(NodeType t) {
+  switch(t) {
+    case NODE_NUM: return "NUM";
+    case NODE_UNA: return "UNA";
+    case NODE_ADD: return "ADD";
+    case NODE_SUB: return "SUB";
+    case NODE_MUL: return "MUL";
+    case NODE_DIV: return "DIV";
+    case NODE_EXP: return "EXP";
+    case NODE_SIN: return "SIN";
+    case NODE_COS: return "COS";
+    case NODE_TAN: return "TAN";
+    case NODE_FRA: return "FRA";
+    case NODE_FLO: return "FLO";
+    case NODE_CEI: return "CEI";
+    default: return "???";
+  }
+}
+
+// Print fixed-point value
+void printFixed(int32_t val) {
+  char buf[16];
+  int32_t intPart = val / FACTOR;
+  int32_t fracPart = val % FACTOR;
+  
+  if (val < 0) {
+    intPart = -intPart;
+    fracPart = -fracPart;
+  }
+  
+  itoa(intPart, buf, 10);
+  tftPrint(buf);
+  
+  if (fracPart > 0) {
+    tftPrint(".");
+    int decimal = (fracPart * 100) / FACTOR;
+    if (decimal < 10) tftPrint("0");
+    itoa(decimal, buf, 10);
+    tftPrint(buf);
+  }
+}
+
+// Print AST as table/list
+void printAST() {
+  tftFill(BLACK);
+  setTextColor(WHITE, BLACK);
+  setTextSize(1);
+  
+  setCursor(5, 5);
+  tftPrint("Input: ");
+  tftPrint(input);
+  
+  setCursor(5, 20);
+  tftPrint("Root node: ");
+  char buf[8];
+  itoa(a, buf, 10);
+  tftPrint(buf);
+  
+  setCursor(5, 35);
+  tftPrint("Total nodes: ");
+  itoa(NodIndex, buf, 10);
+  tftPrint(buf);
+  
+  // Print node table
+  setCursor(5, 55);
+  tftPrint("ID TYPE    VAL      L  R");
+  
+  int yPos = 70;
+  for(int i = 0; i < NodIndex; i++) {
+    setCursor(5, yPos);
+    
+    // Node index
+    itoa(i, buf, 10);
+    tftPrint(buf);
+    if(i < 10) tftPrint(" ");
+    
+    setCursor(25, yPos);
+    // Node type
+    tftPrint(getNodeTypeName(nodes[i].typ));
+    
+    setCursor(70, yPos);
+    // Value (if number)
+    if(nodes[i].typ == NODE_NUM) {
+      printFixed(nodes[i].val);
+    } else {
+      tftPrint("-");
+    }
+    
+    setCursor(140, yPos);
+    // Left child
+    if(nodes[i].lnode != -1) {
+      itoa(nodes[i].lnode, buf, 10);
+      tftPrint(buf);
+    } else {
+      tftPrint("-");
+    }
+    
+    setCursor(165, yPos);
+    // Right child
+    if(nodes[i].rnode != -1) {
+      itoa(nodes[i].rnode, buf, 10);
+      tftPrint(buf);
+    } else {
+      tftPrint("-");
+    }
+    
+    yPos += 15;
+    if(yPos > 220) break; // Don't overflow screen
+  }
+}
 
 void setup() {
+  NodIndex=0;
+  TokIndex=0;
+
+
   tftInit();
-  tftFill(BLACK);
-
+  setTextColor(WHITE, BLACK);
+  setTextSize(1);
+  delay(100);
+  
   Tokenizer(input);
-  uint32_t val = tokens[0].val;
-  uint32_t integer_part = val / FACTOR;
-  uint32_t fractional_part = (val % FACTOR * 100 + FACTOR / 2) / FACTOR;  // rounds to 0-99
-
-  int pos = 0;
-
-  // integer digits
-  int temp = integer_part;
-  if (temp == 0) output[pos++] = '0';
-  else {
-    int digits[20], dcount = 0;
-    while (temp) {
-      digits[dcount++] = temp % 10;
-      temp /= 10;
-    }
-    for (int i = dcount - 1; i >= 0; i--) output[pos++] = '0' + digits[i];
-  }
-
-  // decimal point
-  output[pos++] = '.';
-
-  int temp2 = fractional_part;
-  if (temp2 == 0) output[pos++] = '0';
-  else {
-    int digits[10], dcount = 0;
-    while (temp2) {
-      digits[dcount++] = temp2 % 10;
-      temp2 /= 10;
-    }
-    for (int i = dcount - 1; i >= 0; i--) output[pos++] = '0' + digits[i];
-  }
-
-  output[pos] = '\0';
-
-  tftPrintln(output);
-  tftPrintln(input);
-  int i = 0;
-  char buf[128];
-  while (tokens[i].typ != TOK_NULL) {
-    sprintf(buf, "%d : %ld", tokens[i].typ, tokens[i].val);
-    tftPrintln(buf);
-    i++;
-  }
+  Parser();
+  printAST();
 }
 
 void loop() {
