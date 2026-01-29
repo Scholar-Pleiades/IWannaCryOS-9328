@@ -1,4 +1,24 @@
 #include "ILI.h"
+#include <avr/pgmspace.h>
+
+const int16_t sine_table_256[256] PROGMEM = {
+    0, 6, 13, 19, 25, 31, 38, 44, 50, 56, 62, 68, 74, 80, 86, 92,
+    98, 104, 109, 115, 121, 126, 132, 137, 142, 147, 152, 157, 162, 167, 172, 177,
+    181, 185, 190, 194, 198, 202, 206, 209, 213, 216, 220, 223, 226, 229, 231, 234,
+    237, 239, 241, 243, 245, 247, 248, 250, 251, 252, 253, 254, 255, 255, 256, 256,
+    256, 256, 256, 255, 255, 254, 253, 252, 251, 250, 248, 247, 245, 243, 241, 239,
+    237, 234, 231, 229, 226, 223, 220, 216, 213, 209, 206, 202, 198, 194, 190, 185,
+    181, 177, 172, 167, 162, 157, 152, 147, 142, 137, 132, 126, 121, 115, 109, 104,
+    98, 92, 86, 80, 74, 68, 62, 56, 50, 44, 38, 31, 25, 19, 13, 6,
+    0, -6, -13, -19, -25, -31, -38, -44, -50, -56, -62, -68, -74, -80, -86, -92,
+    -98, -104, -109, -115, -121, -126, -132, -137, -142, -147, -152, -157, -162, -167, -172, -177,
+    -181, -185, -190, -194, -198, -202, -206, -209, -213, -216, -220, -223, -226, -229, -231, -234,
+    -237, -239, -241, -243, -245, -247, -248, -250, -251, -252, -253, -254, -255, -255, -256, -256,
+    -256, -256, -256, -255, -255, -254, -253, -252, -251, -250, -248, -247, -245, -243, -241, -239,
+    -237, -234, -231, -229, -226, -223, -220, -216, -213, -209, -206, -202, -198, -194, -190, -185,
+    -181, -177, -172, -167, -162, -157, -152, -147, -142, -137, -132, -126, -121, -115, -109, -104,
+    -98, -92, -86, -80, -74, -68, -62, -56, -50, -44, -38, -31, -25, -19, -13, -6
+};
 
 enum TOKTYPE {
   TOK_NULL,
@@ -38,7 +58,7 @@ enum NodeType : uint8_t {
   NODE_CEI
 };
 
-char input[256] = "398.23^(3*2)";  // input
+char input[256] = "floor(1.29)";  // input
 char output[64];
 
   uint8_t TokIndex = 0;
@@ -180,6 +200,7 @@ int a;
 void Parser() {
 
     a = parseExpression();
+    
 }
 
 
@@ -240,6 +261,37 @@ int parseUnary() {
   return parsePower(); 
 }
 
+int parseFunction() {
+    TOKTYPE tok = tokens[TokIndex].typ;
+    if (tok >= F_SIN && tok <= F_CEI) {
+        int idx = NodIndex++;
+        nodes[idx].lnode = -1;
+
+        switch(tok) {
+            case F_SIN: nodes[idx].typ = NODE_SIN; break;
+            case F_COS: nodes[idx].typ = NODE_COS; break;
+            case F_TAN: nodes[idx].typ = NODE_TAN; break;
+            case F_FRA: nodes[idx].typ = NODE_FRA; break;
+            case F_FLO: nodes[idx].typ = NODE_FLO; break;
+            case F_CEI: nodes[idx].typ = NODE_CEI; break;
+        }
+
+        TokIndex++;
+        if (tokens[TokIndex].typ == L_PAREN) {
+            TokIndex++;
+            nodes[idx].rnode = parseExpression();
+          if (nodes[idx].rnode == -1) nodes[idx].rnode = parsePrimary();
+
+          if (tokens[TokIndex].typ == R_PAREN) TokIndex++;
+        } 
+        else {
+            nodes[idx].rnode = parseFactor();
+        }
+        return idx;
+    }
+    return -1;
+}
+
 
 int parsePrimary() {
   if (tokens[TokIndex].typ == L_PAREN) {
@@ -255,7 +307,88 @@ int parsePrimary() {
     nodes[NodIndex].rnode = -1;
     return NodIndex++;
   }
-  return -1;
+  int val = parseFunction();
+  return (val==-1) ? -1 : val;
+  
+}
+
+
+int32_t evaluate(int idfa) {
+  if (idfa==-1) {
+    return 0;
+  }
+  Node& n = nodes[idfa];
+  switch (n.typ) {
+    case NODE_NUM: return n.val;
+    case NODE_ADD: return evaluate(n.lnode) + evaluate(n.rnode);
+    case NODE_SUB: return evaluate(n.lnode) - evaluate(n.rnode);
+    case NODE_UNA: return -evaluate(n.rnode);
+    case NODE_MUL: {
+      int64_t res;
+      res = (int64_t)evaluate(n.lnode) * evaluate(n.rnode);
+      if (res > INT32_MAX) return INT32_MAX;
+      if (res < INT32_MIN) return INT32_MIN;
+      return (int32_t)res >> 8;
+    }
+    case NODE_DIV: {
+      int64_t res;
+      if (evaluate(n.rnode) == 0) {
+        return 0;
+      }
+      res = (int64_t)(evaluate(n.lnode) << 8) / evaluate(n.rnode);
+      if (res > INT32_MAX) return INT32_MAX;
+      if (res < INT32_MIN) return INT32_MIN;
+      return (int32_t)res;
+    }
+    case NODE_EXP: {
+      int32_t base= evaluate(n.lnode);
+      int32_t r=evaluate(n.rnode);
+
+      if (r==256) {
+      return base;
+      }
+      if (r<=255) {
+      return 0;
+      }
+
+      int64_t res = base;
+      for(int i=1;i<=(r>>8);i++) {
+        res *= base;
+        res = res >> 8; 
+
+      }
+      if (res > INT32_MAX) return INT32_MAX;
+      if (res < INT32_MIN) return INT32_MIN;
+      return (int32_t)res;
+    }
+    case NODE_SIN: {
+      return ((int16_t)(pgm_read_word(&sine_table_256[((evaluate(n.rnode)*256 ) /(360 << 8)) & 0xFF ])) );
+    }
+    case NODE_COS: {
+      return ((int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode)*256 ) /(360 << 8)) & 0xFF)+64)& 0xFF])) );
+    }
+    case NODE_TAN: {
+      int16_t val = ((int16_t)(pgm_read_word(&sine_table_256[((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF]) << 8)) / (((int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF) + 64) & 0xFF])) == 0) ? 1 : (int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF) + 64) & 0xFF])));
+      if (val > INT16_MAX) {
+        return INT16_MAX;
+      }
+      return val;
+    }
+    case NODE_FRA: {
+      return ((evaluate(n.rnode) %256));
+    }
+    case NODE_CEI: {
+      int funval = evaluate(n.rnode);
+      return funval - (funval % 256) + 256;
+    }
+    case NODE_FLO: {
+      int funval = evaluate(n.rnode);
+      return funval - (funval % 256);
+    }
+
+    
+  }
+  return 0;
 }
 
 // Helper to get node type name
@@ -280,7 +413,7 @@ const char* getNodeTypeName(NodeType t) {
 
 // Print fixed-point value
 void printFixed(int32_t val) {
-  char buf[16];
+  char buf[32];
   int32_t intPart = val / FACTOR;
   int32_t fracPart = val % FACTOR;
   
@@ -383,6 +516,7 @@ void setup() {
   Tokenizer(input);
   Parser();
   printAST();
+  printFixed(evaluate(a));
 }
 
 void loop() {
