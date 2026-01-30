@@ -1,5 +1,11 @@
 #include "ILI.h"
 #include <avr/pgmspace.h>
+#include "TouchScreen.h"
+
+int XP = 7, YP = A2, XM = A1, YM = 6;
+
+TouchScreen ts(XP, YP, XM, YM, 300); 
+TSPoint p = ts.getPoint();
 
 const int16_t sine_table_256[256] PROGMEM = {
     0, 6, 13, 19, 25, 31, 38, 44, 50, 56, 62, 68, 74, 80, 86, 92,
@@ -57,8 +63,9 @@ enum NodeType : uint8_t {
   NODE_FLO,
   NODE_CEI
 };
-
-char input[256] = "floor(1.29)";  // input
+char input[256] = "ceil(256*sin(cos(tan(57.2958+fract(401.0706/3))))) "
+"- floor(128*cos((fract(286.479/2))^(1))) "
+"+ fract(512*sin(171.887+cos(229.183-fract(515.6622/4))))";
 char output[64];
 
   uint8_t TokIndex = 0;
@@ -344,15 +351,14 @@ int32_t evaluate(int idfa) {
       int32_t base= evaluate(n.lnode);
       int32_t r=evaluate(n.rnode);
 
-      if (r==256) {
-      return base;
-      }
-      if (r<=255) {
-      return 0;
+      r = r>>8;
+
+      if (r==0) {
+      return 256;
       }
 
-      int64_t res = base;
-      for(int i=1;i<=(r>>8);i++) {
+      int64_t res = 256;
+      for(int i=1;i<=r;i++) {
         res *= base;
         res = res >> 8; 
 
@@ -362,23 +368,28 @@ int32_t evaluate(int idfa) {
       return (int32_t)res;
     }
     case NODE_SIN: {
-      return ((int16_t)(pgm_read_word(&sine_table_256[((evaluate(n.rnode)*256 ) /(360 << 8)) & 0xFF ])) );
+      uint8_t indx = ((((((evaluate(n.rnode) >> 8)%360) +360) % 360) * 32/45) & 0xFF);
+      return (int32_t)(int16_t)pgm_read_word(&sine_table_256[indx]);
     }
     case NODE_COS: {
-      return ((int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode)*256 ) /(360 << 8)) & 0xFF)+64)& 0xFF])) );
+      uint8_t indx = (((((((evaluate(n.rnode) >> 8)%360) +360) % 360) * 32/45)+64) & 0xFF);
+      return (int32_t)(int16_t)pgm_read_word(&sine_table_256[indx]);
     }
     case NODE_TAN: {
-      int16_t val = ((int16_t)(pgm_read_word(&sine_table_256[((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF]) << 8)) / (((int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF) + 64) & 0xFF])) == 0) ? 1 : (int16_t)(pgm_read_word(&sine_table_256[((((evaluate(n.rnode) * 256) / (360 << 8)) & 0xFF) + 64) & 0xFF])));
-      if (val > INT16_MAX) {
-        return INT16_MAX;
-      }
-      return val;
+      uint8_t input = ((((((evaluate(n.rnode) >> 8)%360) +360) % 360) * 32/45) & 0xFF); 
+      uint8_t indx = (((((((evaluate(n.rnode) >> 8)%360) +360) % 360) * 32/45)+64) & 0xFF);
+      int64_t sin = (int64_t)(int16_t)pgm_read_word(&sine_table_256[input]);
+      int64_t cos = (int64_t)(int16_t)pgm_read_word(&sine_table_256[indx]);
+      return (cos==0) ? (2147483647L >> 8) : (int32_t)(int16_t)((sin << 8 )/cos);
     }
     case NODE_FRA: {
-      return ((evaluate(n.rnode) %256));
+      return ((evaluate(n.rnode) & 0xFF));
     }
     case NODE_CEI: {
       int funval = evaluate(n.rnode);
+      if ((funval % 256)==0) {
+       return funval;
+      }
       return funval - (funval % 256) + 256;
     }
     case NODE_FLO: {
@@ -516,6 +527,7 @@ void setup() {
   Tokenizer(input);
   Parser();
   printAST();
+  tftPrintln("");
   printFixed(evaluate(a));
 }
 
