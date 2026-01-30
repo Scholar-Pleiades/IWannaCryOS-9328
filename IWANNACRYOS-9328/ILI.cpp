@@ -583,6 +583,7 @@ void drawChar(uint16_t x, uint16_t y, char c,
         if (col & 0x20) fillRect(px, y + 5 * size, size, size, color);
         if (col & 0x40) fillRect(px, y + 6 * size, size, size, color);
     }
+    
 }
 
 // ULTRA-FAST string printing - minimal overhead
@@ -630,6 +631,7 @@ void tftPrint(const char* str) {
         }
         str++;
     }
+    setCursor(getCursorX(), getCursorY()+1);
 }
 
 // Optimized single-line print

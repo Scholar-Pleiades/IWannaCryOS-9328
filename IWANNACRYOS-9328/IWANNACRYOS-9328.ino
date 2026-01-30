@@ -7,6 +7,25 @@ int XP = 7, YP = A2, XM = A1, YM = 6;
 TouchScreen ts(XP, YP, XM, YM, 300); 
 TSPoint p = ts.getPoint();
 
+enum WINDOWS {
+  WIN_MAIN,
+  WIN_CALC,
+  WIN_GRAP,
+  WIN_PAIN,
+  WIN_NOTE,
+};
+
+uint8_t keyset;
+
+WINDOWS curwin = WIN_GRAP;
+uint8_t selwin = 2;
+
+bool static ranmain = false;
+bool static rancalc = false;
+bool static ranpaint = false;
+bool static rangraph = false;
+bool static rannote = false;
+
 const int16_t sine_table_256[256] PROGMEM = {
     0, 6, 13, 19, 25, 31, 38, 44, 50, 56, 62, 68, 74, 80, 86, 92,
     98, 104, 109, 115, 121, 126, 132, 137, 142, 147, 152, 157, 162, 167, 172, 177,
@@ -63,9 +82,7 @@ enum NodeType : uint8_t {
   NODE_FLO,
   NODE_CEI
 };
-char input[256] = "ceil(256*sin(cos(tan(57.2958+fract(401.0706/3))))) "
-"- floor(128*cos((fract(286.479/2))^(1))) "
-"+ fract(512*sin(171.887+cos(229.183-fract(515.6622/4))))";
+char input[256] = "32.25";
 char output[64];
 
   uint8_t TokIndex = 0;
@@ -402,36 +419,12 @@ int32_t evaluate(int idfa) {
   return 0;
 }
 
-// Helper to get node type name
-const char* getNodeTypeName(NodeType t) {
-  switch(t) {
-    case NODE_NUM: return "NUM";
-    case NODE_UNA: return "UNA";
-    case NODE_ADD: return "ADD";
-    case NODE_SUB: return "SUB";
-    case NODE_MUL: return "MUL";
-    case NODE_DIV: return "DIV";
-    case NODE_EXP: return "EXP";
-    case NODE_SIN: return "SIN";
-    case NODE_COS: return "COS";
-    case NODE_TAN: return "TAN";
-    case NODE_FRA: return "FRA";
-    case NODE_FLO: return "FLO";
-    case NODE_CEI: return "CEI";
-    default: return "???";
-  }
-}
-
-// Print fixed-point value
 void printFixed(int32_t val) {
   char buf[32];
   int32_t intPart = val / FACTOR;
   int32_t fracPart = val % FACTOR;
   
-  if (val < 0) {
-    intPart = -intPart;
-    fracPart = -fracPart;
-  }
+  if (fracPart < 0) fracPart = -fracPart;  // Make fraction positive
   
   itoa(intPart, buf, 10);
   tftPrint(buf);
@@ -445,91 +438,112 @@ void printFixed(int32_t val) {
   }
 }
 
-// Print AST as table/list
-void printAST() {
-  tftFill(BLACK);
-  setTextColor(WHITE, BLACK);
-  setTextSize(1);
-  
-  setCursor(5, 5);
-  tftPrint("Input: ");
-  tftPrint(input);
-  
-  setCursor(5, 20);
-  tftPrint("Root node: ");
-  char buf[8];
-  itoa(a, buf, 10);
-  tftPrint(buf);
-  
-  setCursor(5, 35);
-  tftPrint("Total nodes: ");
-  itoa(NodIndex, buf, 10);
-  tftPrint(buf);
-  
-  // Print node table
-  setCursor(5, 55);
-  tftPrint("ID TYPE    VAL      L  R");
-  
-  int yPos = 70;
-  for(int i = 0; i < NodIndex; i++) {
-    setCursor(5, yPos);
-    
-    // Node index
-    itoa(i, buf, 10);
-    tftPrint(buf);
-    if(i < 10) tftPrint(" ");
-    
-    setCursor(25, yPos);
-    // Node type
-    tftPrint(getNodeTypeName(nodes[i].typ));
-    
-    setCursor(70, yPos);
-    // Value (if number)
-    if(nodes[i].typ == NODE_NUM) {
-      printFixed(nodes[i].val);
-    } else {
-      tftPrint("-");
-    }
-    
-    setCursor(140, yPos);
-    // Left child
-    if(nodes[i].lnode != -1) {
-      itoa(nodes[i].lnode, buf, 10);
-      tftPrint(buf);
-    } else {
-      tftPrint("-");
-    }
-    
-    setCursor(165, yPos);
-    // Right child
-    if(nodes[i].rnode != -1) {
-      itoa(nodes[i].rnode, buf, 10);
-      tftPrint(buf);
-    } else {
-      tftPrint("-");
-    }
-    
-    yPos += 15;
-    if(yPos > 220) break; // Don't overflow screen
-  }
-}
-
 void setup() {
   NodIndex=0;
   TokIndex=0;
 
 
   tftInit();
-  setTextColor(WHITE, BLACK);
-  setTextSize(1);
+  tftFill(BLACK);
+  setTextColor(GREEN, BLACK);
+  setTextSize(2);
+  setCursor(0, 15);
   delay(100);
   
   Tokenizer(input);
   Parser();
-  printAST();
-  tftPrintln("");
-  printFixed(evaluate(a));
 }
 
 void loop() {
+  handleEvents();
+  update();
+  render();
 }
+
+void handleEvents() {
+
+}
+
+void update() {
+
+}
+
+void render() {
+  if (curwin == WIN_MAIN) {
+    if(ranmain) return;
+
+    tftFill(BLACK);
+
+    fillRect(2, 2, 316, 2, WHITE);
+    fillRect(2, 2, 2, 236, WHITE);
+    fillRect(2, 236, 316, 2, WHITE);
+    fillRect(316, 2, 2, 236, WHITE);
+
+    setCursor(getCursorX()+10, getCursorY());
+    tftPrintChar( (selwin == WIN_CALC) ? (char)(0x3E) : (char)(0x20) );
+    tftPrintln("Calculator");
+    setCursor(getCursorX()+10, getCursorY());
+    tftPrintChar( (selwin == WIN_GRAP) ? (char)(0x3E) : (char)(0x20) );
+    tftPrintln("Grapher");
+    setCursor(getCursorX()+10, getCursorY());
+    tftPrintChar( (selwin == WIN_PAIN) ? (char)(0x3E) : (char)(0x20) );
+    tftPrintln("Paint");
+    setCursor(getCursorX()+10, getCursorY());
+    tftPrintChar( (selwin == WIN_NOTE) ? (char)(0x3E) : (char)(0x20) );
+    tftPrintln("Notepad"); 
+    ranmain = true;
+  }
+  if (curwin == WIN_CALC) {
+    if(rancalc) return;
+
+    tftFill(BLACK);
+    
+    fillRect(2, 2, 316, 2, WHITE);
+    fillRect(2, 2, 2, 236, WHITE);
+    fillRect(2, 236, 316, 2, WHITE);
+    fillRect(316, 2, 2, 236, WHITE);
+
+    fillRect(2, 214, 316, 2, WHITE);
+
+    setCursor(6, 6);
+    tftPrint("Input:");
+    tftPrint(input);
+
+    setCursor(6, 218);
+    tftPrint("Output:");
+
+    Tokenizer(input);
+    Parser();
+    printFixed(evaluate(a));    
+
+    rancalc = true;
+  }
+  if (curwin == WIN_GRAP) {
+    if(rangraph) return;
+
+    tftFill(BLACK);
+    
+    fillRect(2, 2, 316, 2, WHITE);
+    fillRect(2, 2, 2, 236, WHITE);
+    fillRect(2, 236, 316, 2, WHITE);
+    fillRect(316, 2, 2, 236, WHITE);
+
+    fillRect(2, 26, 316, 2, WHITE);
+
+    setCursor(6, 6);
+    tftPrint("Input:");
+    tftPrint(input);
+
+    rangraph = true;
+  }
+}
+
+
+
+
+
+
+
+
+
+
